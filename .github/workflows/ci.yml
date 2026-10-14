@@ -1,0 +1,87 @@
+# Every push: format, validate and offline tests per module, lint and security scan, docs in sync,
+# then a real apply/destroy of the network and storage modules against LocalStack.
+name: ci
+
+on:
+  push:
+    branches: [main]
+    tags: ["*/v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TF_VERSION: 1.15.6
+
+jobs:
+  test:
+    name: test ${{ matrix.dir }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dir: [modules/vpc, modules/security-group, modules/ec2-asg, modules/rds-postgres, modules/s3-bucket, examples/web-app]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - name: fmt
+        run: terraform fmt -check -recursive
+      - name: validate and test (AWS provider mocked)
+        working-directory: ${{ matrix.dir }}
+        run: |
+          terraform init -backend=false -input=false
+          terraform validate
+          terraform test
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: v0.59.1
+      - name: tflint (preset all + AWS ruleset)
+        run: |
+          tflint --init --config "$GITHUB_WORKSPACE/.tflint.hcl"
+          for d in modules/* examples/web-app; do
+            echo "== $d"; (cd "$d" && tflint --config "$GITHUB_WORKSPACE/.tflint.hcl")
+          done
+      - name: checkov (skips are inline, each with its reason)
+        run: |
+          docker run --rm -v "$PWD:/data" -w /data bridgecrew/checkov:3.2.495 \
+            -d . --framework terraform --skip-path tests --compact --quiet
+      - name: module READMEs match the code
+        run: |
+          for m in modules/*; do
+            docker run --rm -v "$PWD:/data" -w /data quay.io/terraform-docs/terraform-docs:0.20.0 \
+              --config /data/.terraform-docs.yml --output-check "$m"
+          done
+
+  integration:
+    runs-on: ubuntu-latest
+    needs: test
+    services:
+      localstack:
+        image: localstack/localstack:4.4
+        ports: ["4566:4566"]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - name: wait for LocalStack
+        run: for i in $(seq 60); do curl -sf localhost:4566/_localstack/health && break; sleep 2; done
+      - name: apply, verify through the API, destroy
+        working-directory: tests/localstack
+        run: |
+          terraform init -backend=false -input=false
+          terraform test

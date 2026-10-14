@@ -49,6 +49,8 @@ jobs:
         with:
           tflint_version: v0.59.1
       - name: tflint (preset all + AWS ruleset)
+        env:
+          GITHUB_TOKEN: ${{ github.token }} # plugin download: avoids the anonymous API rate limit
         run: |
           tflint --init --config "$GITHUB_WORKSPACE/.tflint.hcl"
           for d in modules/* examples/web-app; do

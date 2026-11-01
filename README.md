@@ -47,7 +47,28 @@ Each module is versioned on its own with tags `<module>/v<MAJOR.MINOR.PATCH>`, s
 | Fix with no interface or plan change for existing users | PATCH |
 
 `scripts/release.sh <module> <version>` tags a release only if the version is valid and newer than
-the module's last tag, `CHANGELOG.md` has an entry for it, and the module's tests pass.
+the module's last tag, **big enough for what changed**, `CHANGELOG.md` has an entry for it, and the
+module's tests pass.
+
+**The table is enforced, not just written down.** `scripts/semver_check.py` compares the module's
+interface at its last tag with the working tree (inputs, outputs, resource addresses and minimum
+versions, read with terraform-docs) and works out the smallest allowed bump:
+
+```
+$ python scripts/semver_check.py s3-bucket --proposed 1.1.0
+### s3-bucket: **MAJOR** change vs s3-bucket/v1.0.0
+- major: output `regional_domain_name` removed
+- major: resource `aws_s3_bucket_policy.this` removed or renamed without a moved block: existing users would have it destroyed
+- minor: new optional input `object_lock`
+
+1.1.0 is too small a step from 1.0.0 for a MAJOR change (at least 2.0.0)
+```
+
+A rename with a `moved` block counts as a patch, because state moves and nothing is replaced. CI
+runs the check's unit tests and a self-test that makes one real edit of each kind to a copy of
+`s3-bucket` (9 cases, from "description reworded → patch" to "provider minimum raised → major"),
+and reports the required bump for every module. Design:
+[`docs/architecture.md`](docs/architecture.md#4-versioning-and-the-interface-contract).
 
 ## Testing
 | Layer | What | Where | Result |

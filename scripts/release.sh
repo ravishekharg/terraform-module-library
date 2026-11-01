@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Tag a module release: <module>/v<semver>, e.g. vpc/v1.1.0. Consumers pin that tag:
 #   source = "git::https://github.com/ravishekharg/terraform-module-library.git//modules/vpc?ref=vpc/v1.1.0"
-# Refuses unless the version is valid semver, newer than the module's last tag, has a CHANGELOG
-# entry, and the module's tests pass. Creates the tag locally; pushing it is a separate step.
+# Refuses unless the version is valid semver, newer than the module's last tag, big enough for the
+# interface change since that tag (scripts/semver_check.py), has a CHANGELOG entry, and the module's
+# tests pass. Creates the tag locally; pushing it is a separate step.
 #   bash scripts/release.sh vpc 1.1.0
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -20,6 +21,8 @@ if [ -n "$last" ] && [ "$(printf '%s\n%s\n' "$last" "$version" | sort -V | tail 
   echo "$version is not newer than the last release $last"; exit 1
 fi
 grep -q "^## $module $version" CHANGELOG.md || { echo "CHANGELOG.md has no '## $module $version' section"; exit 1; }
+python3 scripts/semver_check.py "$module" --proposed "$version" \
+  || { echo "the interface change needs a bigger version bump (see above)"; exit 1; }
 
 (cd "modules/$module" && terraform init -backend=false -input=false >/dev/null && terraform test >/dev/null) \
   || { echo "tests fail for $module"; exit 1; }

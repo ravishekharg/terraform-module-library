@@ -68,6 +68,20 @@ class Diff(unittest.TestCase):
         level, reasons = changed(f)
         self.assertEqual(level, "patch", reasons)
 
+    def test_output_description_is_patch(self):
+        self.assertEqual(changed(lambda h: h["outputs"][0].update(description="The VPC id."))[0], "patch")
+
+    def test_terraform_docs_type_without_provider_prefix_still_matches_moved_blocks(self):
+        def strip(doc):
+            for r in doc["resources"]:
+                r["provider"], r["type"] = "aws", r["type"].removeprefix("aws_")
+        base, head = copy.deepcopy(BASE), copy.deepcopy(BASE)
+        strip(base)
+        strip(head)
+        head["resources"][1]["name"] = "app"
+        head["moved"] = {"aws_subnet.private": "aws_subnet.app"}       # moved blocks use the full type
+        self.assertEqual(diff(base, head)[0], "patch")
+
     def test_data_sources_and_whitespace_in_types_are_ignored(self):
         def f(h):
             h["resources"].pop()                                  # a data source: no state to destroy

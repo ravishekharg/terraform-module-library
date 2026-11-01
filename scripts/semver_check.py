@@ -64,7 +64,12 @@ def _min_version(constraint: str | None) -> tuple[int, ...]:
 
 
 def _resource_addr(r: dict) -> str:
-    return f'{r["type"]}.{r["name"]}' if r.get("mode", "managed") == "managed" else f'data.{r["type"]}.{r["name"]}'
+    """Terraform address, e.g. aws_s3_bucket.this. terraform-docs reports the type without its provider prefix
+    ("s3_bucket", provider "aws"), while moved blocks use the full type, so put the prefix back."""
+    t, p = r["type"], r.get("provider") or ""
+    if p and not t.startswith(f"{p}_"):
+        t = f"{p}_{t}"
+    return f"{t}.{r['name']}" if r.get("mode", "managed") == "managed" else f"data.{t}.{r['name']}"
 
 
 def diff(base: dict, head: dict) -> tuple[str, list[tuple[str, str]]]:
@@ -91,10 +96,12 @@ def diff(base: dict, head: dict) -> tuple[str, list[tuple[str, str]]]:
         elif (a.get("description") or "") != (b.get("description") or ""):
             reasons.append(("patch", f"input `{name}` description changed"))
 
-    bo = {o["name"] for o in base.get("outputs") or []}
-    ho = {o["name"] for o in head.get("outputs") or []}
-    reasons += [("major", f"output `{n}` removed") for n in sorted(bo - ho)]
-    reasons += [("minor", f"new output `{n}`") for n in sorted(ho - bo)]
+    bo = {o["name"]: o for o in base.get("outputs") or []}
+    ho = {o["name"]: o for o in head.get("outputs") or []}
+    reasons += [("major", f"output `{n}` removed") for n in sorted(bo.keys() - ho.keys())]
+    reasons += [("minor", f"new output `{n}`") for n in sorted(ho.keys() - bo.keys())]
+    reasons += [("patch", f"output `{n}` description changed") for n in sorted(bo.keys() & ho.keys())
+                if (bo[n].get("description") or "") != (ho[n].get("description") or "")]
 
     br = {_resource_addr(r) for r in base.get("resources") or [] if r.get("mode", "managed") == "managed"}
     hr = {_resource_addr(r) for r in head.get("resources") or [] if r.get("mode", "managed") == "managed"}

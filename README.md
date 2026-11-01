@@ -52,7 +52,8 @@ module's tests pass.
 
 **The table is enforced, not just written down.** `scripts/semver_check.py` compares the module's
 interface at its last tag with the working tree (inputs, outputs, resource addresses and minimum
-versions, read with terraform-docs) and works out the smallest allowed bump:
+versions, read with terraform-docs) and works out the smallest allowed bump. For example, after
+`s3-bucket 1.0.0` is tagged, removing an output, renaming a resource and adding an input gives:
 
 ```
 $ python scripts/semver_check.py s3-bucket --proposed 1.1.0
